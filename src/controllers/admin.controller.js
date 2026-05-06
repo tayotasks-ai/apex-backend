@@ -93,7 +93,7 @@ const createStudent = catchAsync(async (req, res) => {
   const student = await Student.create({
     schoolId: schoolId(req), firstName, lastName,
     email: email?.toLowerCase(), phone, gender, dob, admissionNo, parentId: parentId || null,
-    password: hashed,
+    password: hashed, verificationToken: plain, isVerified: false
   });
   const school = await School.findById(schoolId(req));
   const session = await AcademicSession.findOne({ schoolId: schoolId(req), isCurrent: true });
@@ -108,7 +108,7 @@ const createStudent = catchAsync(async (req, res) => {
         className: 'Your Class', // Can be refined if class is known
         sessionName: session?.name || 'Current Session',
         studentEmail: email,
-        tempPassword: plain,
+        otp: plain,
         loginUrl: `${process.env.CLIENT_URL}/login`
       })
     });
@@ -150,7 +150,7 @@ const bulkCreateStudents = catchAsync(async (req, res) => {
         });
       }
 
-      results.push({ email: s.email, admissionNo: s.admissionNo, status: 'Success', temporaryPassword: plain });
+      results.push({ email: s.email, admissionNo: s.admissionNo, status: 'Success', temporaryPassword: otp });
     } catch (e) {
       results.push({ email: s.email, admissionNo: s.admissionNo, status: 'Failed', reason: e.message });
     }
