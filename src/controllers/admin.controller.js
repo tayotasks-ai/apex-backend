@@ -4,8 +4,14 @@ const { catchAsync, ok, created, ApiError, paginate, meta, getGrade } = require(
 const { sendSMS } = require('../utils/sms');
 const { sendEmail } = require('../utils/resend');
 const { uploadBuffer } = require('../config/cloudinary');
-const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment, Branch, Assessment, Result, Attendance, TermSummary, StudentRemark } = require('../models');
+const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment, Branch, Assessment, Result, Attendance, TermSummary, StudentRemark, Subscription } = require('../models');
 const { inviteStaff, studentOnboarding, feeReminder } = require('../utils/emailTemplates');
+const {
+  listBanks: paystackListBanks,
+  resolveAccount: paystackResolveAccount,
+  createSubaccount,
+  updateSubaccount,
+} = require('../utils/paystack');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const schoolId = req => req.user.schoolId;
@@ -406,22 +412,54 @@ const sendFeeReminders = catchAsync(async (req, res) => {
 
 // ── SMS Broadcast ─────────────────────────────────────────────────────────────
 const sendBroadcast = catchAsync(async (req, res) => {
-  const { message, audience } = req.body; // audience: 'parents' | 'teachers' | 'all'
+  const { message, audience } = req.body;
+  const sid = schoolId(req);
+
+  // ─ Check SMS quota ──────────────────────────────────────────────────────────
+  const session = await AcademicSession.findOne({ schoolId: sid, isCurrent: true }).lean();
+  if (!session) throw new ApiError(400, 'No active session');
+
+  const sub = await Subscription.findOne({ schoolId: sid, sessionId: session._id, status: 'active' });
+  if (!sub) throw new ApiError(402, 'No active subscription for this session');
+
+  const remaining = (sub.smsQuota || 0) - (sub.smsUsed || 0);
+  if (remaining <= 0) {
+    throw new ApiError(429, `SMS quota exhausted. You have used all ${sub.smsQuota} SMS credits for this term.`);
+  }
+
   const roles = audience === 'parents' ? ['parent'] : audience === 'teachers' ? ['teacher'] : ['parent', 'teacher'];
-  const users = await User.find({ schoolId: schoolId(req), role: { $in: roles }, phone: { $exists: true, $ne: '' } }).lean();
+  const users = await User.find({ schoolId: sid, role: { $in: roles }, phone: { $exists: true, $ne: '' } }).lean();
   const phones = users.map(u => u.phone).filter(Boolean);
-  if (!phones.length) return ok(res, { sent: 0 }, 'No recipients with phone numbers');
+  if (!phones.length) return ok(res, { sent: 0, smsRemaining: remaining }, 'No recipients with phone numbers');
 
-  // Fire and forget – don't block the response
-  sendSMS(phones, message).catch(e => console.error('[broadcast]', e));
+  // Cap sends to remaining quota
+  const canSend = Math.min(phones.length, remaining);
+  const sendPhones = phones.slice(0, canSend);
+  const skipped = phones.length - canSend;
 
-  // Save as notification too
-  await Notification.insertMany(users.map(u => ({
-    schoolId: schoolId(req), recipientId: u._id,
+  // Fire and forget
+  sendSMS(sendPhones, message).catch(e => console.error('[broadcast]', e));
+
+  // Increment smsUsed atomically
+  await Subscription.findByIdAndUpdate(sub._id, { $inc: { smsUsed: canSend } });
+
+  // Save as in-app notification
+  await Notification.insertMany(users.slice(0, canSend).map(u => ({
+    schoolId: sid, recipientId: u._id,
     title: 'School Notification', body: message, type: 'broadcast',
   })));
 
-  return ok(res, { sent: phones.length }, `SMS sent to ${phones.length} recipients`);
+  const newRemaining = remaining - canSend;
+  const msg = skipped > 0
+    ? `SMS sent to ${canSend} recipients. ${skipped} skipped (quota limit). ${newRemaining} SMS credits left.`
+    : `SMS sent to ${canSend} recipients. ${newRemaining} SMS credits remaining this term.`;
+
+  return ok(res, {
+    sent: canSend, skipped,
+    smsUsed: (sub.smsUsed || 0) + canSend,
+    smsQuota: sub.smsQuota,
+    smsRemaining: newRemaining,
+  }, msg);
 });
 
 // ── Holidays / Calendar ───────────────────────────────────────────────────────
@@ -684,4 +722,5 @@ module.exports = {
   sendFeeReminders,
   createBranch, listBranches, updateBranch, deleteBranch,
   getStudentStats, getClassStats,
+  listBanks, resolveAccount, setBankAccount,
 };

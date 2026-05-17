@@ -11,8 +11,18 @@ const SchoolSchema = new Schema({
   isActive:  { type: Boolean, default: false },
   plan:      { type: String, enum: ['trial', 'basic', 'pro'], default: 'trial' },
   termiiSenderId: { type: String, default: 'ApexSchool' },
-  caMax:     { type: Number, default: 40 },   // max CA score per subject (default 40/60 split)
-  examMax:   { type: Number, default: 60 },   // max exam score per subject
+  caMax:     { type: Number, default: 40 },
+  examMax:   { type: Number, default: 60 },
+  // Paystack split – set when admin saves bank account
+  bankAccount: {
+    accountNumber:        { type: String },
+    bankCode:             { type: String },
+    bankName:             { type: String },
+    accountName:          { type: String },
+    paystackSubaccountId: { type: String },   // subaccount ID
+    paystackSubaccountCode: { type: String }, // e.g. ACCT_xxxxx (used in payment init)
+    settlementBank:       { type: String },   // bank code for paystack
+  },
 }, { timestamps: true });
 
 // ── User  (admin | teacher | parent) ─────────────────────────────────────────
@@ -373,6 +383,9 @@ const SubscriptionSchema = new Schema({
   status:          { type: String, enum: ['pending', 'active', 'expired', 'cancelled'], default: 'pending' },
   paidAt:          { type: Date },
   expiresAt:       { type: Date },
+  // SMS quota: ₦2,000 per student / ₦10 per SMS = 200 SMS per student per term
+  smsQuota:        { type: Number, default: 0 },  // set on activation = studentCount * 200
+  smsUsed:         { type: Number, default: 0 },  // incremented per broadcast send
   metadata:        { type: Schema.Types.Mixed },
 }, { timestamps: true });
 SubscriptionSchema.index({ schoolId: 1, sessionId: 1 }, { unique: true });

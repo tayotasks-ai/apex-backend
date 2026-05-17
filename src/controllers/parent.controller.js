@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { catchAsync, ok, created, ApiError, getGrade } = require('../utils/helpers');
 const { initializePayment, verifyPayment } = require('../utils/paystack');
+const { School } = require('../models');
 
 const sId = req => req.user.schoolId;
 const uId = req => req.user.id;
@@ -102,12 +103,23 @@ const initFeePayment = catchAsync(async (req, res) => {
   const reference = `APEX-${uuid().replace(/-/g, '').slice(0, 16).toUpperCase()}`;
   const parent = await require('../models').User.findById(uId(req));
 
+  // Fetch school's Paystack subaccount (if configured)
+  const school = await School.findById(sId(req)).select('bankAccount name').lean();
+  const subaccountCode = school?.bankAccount?.paystackSubaccountCode || null;
+
   const paymentData = await initializePayment({
     email: parent.email,
     amount,
     reference,
-    metadata: { studentId, parentId: uId(req), schoolId: sId(req), sessionId: session._id },
+    metadata: {
+      studentId, parentId: uId(req),
+      schoolId: sId(req), sessionId: session._id,
+      subaccountCode,
+    },
     callbackUrl: `${process.env.CLIENT_URL}/parent/fees?ref=${reference}`,
+    subaccountCode,
+    bearer: subaccountCode ? 'subaccount' : undefined, // subaccount absorbs Paystack fee → parent pays full amount
+    channels: ['bank_transfer', 'card', 'ussd'],       // bank transfer priority
   });
 
   await FeePayment.create({

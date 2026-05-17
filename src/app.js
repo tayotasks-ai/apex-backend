@@ -39,7 +39,22 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(fileUpload({ useTempFiles: false, limits: { fileSize: 20 * 1024 * 1024 } }));
 
+const path = require('path');
+const fs   = require('fs');
+
 app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
+
+// ── APK download ────────────────────────────────────────────────────────
+app.get('/download/app', (req, res) => {
+  const apkPath = path.join(__dirname, '..', 'apexschool.apk');
+  if (!fs.existsSync(apkPath)) {
+    return res.status(404).json({ message: 'APK not available yet. Check back soon.' });
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', 'attachment; filename="apexschool.apk"');
+  res.sendFile(apkPath);
+});
+
 app.use('/api/v1', routes);
 app.use(errorHandler);
 

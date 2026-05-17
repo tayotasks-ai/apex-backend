@@ -45,6 +45,10 @@ router.get('/admin/dashboard',             authorize(A), admin.dashboardStats);
 router.get('/admin/school',                authorize(A), admin.getSchool);
 router.patch('/admin/school',              authorize(A), admin.updateSchool);
 
+// Bank account + Paystack subaccount
+router.get('/admin/banks',                 authorize(A), admin.listBanks);
+router.post('/admin/bank-account/resolve', authorize(A), admin.resolveAccount);
+router.post('/admin/bank-account',         authorize(A), admin.setBankAccount);
 router.post('/admin/users',               authorize(A), admin.createUser);
 router.post('/admin/users/bulk',          authorize(A), admin.bulkCreateUsers);
 router.get('/admin/users',                authorize(A), admin.listUsers);

@@ -63,10 +63,13 @@ async function run() {
         status: 'active',
         paidAt: new Date(),
         expiresAt: session.endDate,
+        smsQuota: 1000,  // flat 1,000 SMS per school per term
+        smsUsed: 0,
       });
-      console.log('Created active Subscription for the session.');
+      console.log('Created active Subscription for the session (2,000 SMS quota).');
     } else {
       sub.status = 'active';
+      if (!sub.smsQuota) sub.smsQuota = 1000;
       await sub.save();
       console.log('Updated existing Subscription to active.');
     }

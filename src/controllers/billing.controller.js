@@ -6,6 +6,7 @@ const { sendEmail } = require('../utils/resend');
 const { subscriptionConfirmed } = require('../utils/emailTemplates');
 
 const PRICE_PER_STUDENT = 2000; // ₦2,000 naira
+const SMS_QUOTA_PER_TERM = 1000; // Flat 1,000 SMS per school per term
 
 // ─── Get current subscription status ─────────────────────────────────────────
 const getSubscriptionStatus = catchAsync(async (req, res) => {
@@ -27,11 +28,16 @@ const getSubscriptionStatus = catchAsync(async (req, res) => {
     session: session.name,
     studentCount,
     pricePerStudent: PRICE_PER_STUDENT,
+    smsPerStudent: SMS_PER_STUDENT,
     totalDue,
     subscription: sub || null,
     isActive: sub?.status === 'active',
     isPending: sub?.status === 'pending',
     isExpired: !sub || sub.status === 'expired',
+    smsQuota: sub?.smsQuota || 0,
+    smsUsed:  sub?.smsUsed  || 0,
+    smsRemaining: Math.max(0, (sub?.smsQuota || 0) - (sub?.smsUsed || 0)),
+    smsQuotaPerTerm: SMS_QUOTA_PER_TERM,
   });
 });
 
@@ -123,6 +129,7 @@ const verifySubscription = catchAsync(async (req, res) => {
   sub.status = 'active';
   sub.paidAt = new Date();
   sub.expiresAt = session?.endDate || new Date(Date.now() + 120 * 24 * 3600 * 1000);
+  sub.smsQuota = SMS_QUOTA_PER_TERM;  // flat 1,000 SMS per school per term
   sub.metadata = data;
   await sub.save();
 
@@ -159,6 +166,7 @@ const subscriptionWebhook = async (req, res) => {
     sub.status = 'active';
     sub.paidAt = new Date();
     sub.expiresAt = session?.endDate || new Date(Date.now() + 120 * 24 * 3600 * 1000);
+    sub.smsQuota = SMS_QUOTA_PER_TERM;
     sub.metadata = req.body.data;
     await sub.save();
 
