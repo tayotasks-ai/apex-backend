@@ -21,6 +21,7 @@ const allowedOrigins = [
   'https://app.theapexschool.com',
   'https://www.theapexschool.com',
   'https://theapexschool.com',
+  'https://apex-backend-543c.onrender.com'
 ];
 
 app.use(cors({

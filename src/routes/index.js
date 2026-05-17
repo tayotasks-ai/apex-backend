@@ -1,5 +1,5 @@
 const router  = require('express').Router();
-const { authenticate, authorize } = require('../middleware');
+const { authenticate, authorize, authorizeRoot } = require('../middleware');
 const { requireActiveSubscription } = require('../middleware/subscription');
 
 const auth     = require('../controllers/auth.controller');
@@ -8,6 +8,8 @@ const teacher  = require('../controllers/teacher.controller');
 const student  = require('../controllers/student.controller');
 const parent   = require('../controllers/parent.controller');
 const billing  = require('../controllers/billing.controller');
+const root     = require('../controllers/root.controller');
+const report   = require('../controllers/report.controller');
 
 const A = 'admin', T = 'teacher', P = 'parent', S = 'student';
 
@@ -18,6 +20,14 @@ router.post('/auth/select-school', auth.selectSchool);
 router.post('/auth/student-login', auth.studentLogin);
 router.post('/auth/verify-email',  auth.verifyEmail);
 router.get('/auth/me',             authenticate, auth.me);
+
+// ── Root (platform super-admin — public login, all others require root token) ─
+router.post('/root/setup',         root.setup);
+router.post('/root/login',         root.login);
+router.get('/root/dashboard',      authenticate, authorizeRoot, root.dashboard);
+router.get('/root/schools',        authenticate, authorizeRoot, root.listSchools);
+router.get('/root/schools/:id',    authenticate, authorizeRoot, root.getSchool);
+router.patch('/root/schools/:id',  authenticate, authorizeRoot, root.updateSchool);
 
 // ── Billing (admin only — always accessible, subscription gate exempt) ─────────
 const adm = [authenticate, authorize(A)];
@@ -72,6 +82,19 @@ router.post('/admin/calendar',            authorize(A), admin.createHoliday);
 router.get('/admin/calendar',             admin.listHolidays);
 router.delete('/admin/calendar/:id',      authorize(A), admin.deleteHoliday);
 
+// ── Branches ──────────────────────────────────────────────────────────────────
+router.post('/admin/branches',            authorize(A), admin.createBranch);
+router.get('/admin/branches',             authorize(A), admin.listBranches);
+router.patch('/admin/branches/:id',       authorize(A), admin.updateBranch);
+router.delete('/admin/branches/:id',      authorize(A), admin.deleteBranch);
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+router.post('/admin/reports/generate',                   authorize(A), report.generateReport);
+router.get('/admin/reports/session',                     authorize(A), report.getSessionReports);
+router.get('/admin/reports/student/:studentId',          authorize(A), report.getStudentReport);
+router.get('/admin/reports/student/:studentId/annual',   authorize(A), report.getAnnualReport);
+router.patch('/admin/reports/:id/remarks',               authorize(A), report.updateRemarks);
+
 // ── Teacher ───────────────────────────────────────────────────────────────────
 router.get('/teacher/classes',                authorize(T, A), teacher.myClasses);
 router.post('/teacher/attendance',            authorize(T, A), teacher.markAttendance);
@@ -96,6 +119,11 @@ router.get('/teacher/notes',                  authorize(T, A), teacher.listNotes
 router.post('/teacher/timetable',             authorize(T, A), teacher.upsertTimetable);
 router.get('/teacher/timetable',              teacher.getTimetable);
 
+// ── Teacher remarks ───────────────────────────────────────────────────────────
+router.post('/teacher/remarks',            authorize(T, A), teacher.createRemark);
+router.get('/teacher/remarks',             authorize(T, A), teacher.listRemarks);
+router.delete('/teacher/remarks/:id',      authorize(T, A), teacher.deleteRemark);
+
 // ── Student ───────────────────────────────────────────────────────────────────
 router.get('/student/enrollment',          authorize(S), student.myEnrollment);
 router.get('/student/timetable',           authorize(S), student.myTimetable);
@@ -106,11 +134,19 @@ router.post('/student/quizzes/submit',     authorize(S), student.submitQuiz);
 router.get('/student/assignments',         authorize(S), student.myAssignments);
 router.post('/student/assignments/submit', authorize(S), student.submitAssignment);
 router.get('/student/notes',               authorize(S), student.myNotes);
+router.get('/student/subjects',            authorize(S), student.mySubjects);
+router.post('/student/subjects/select',    authorize(S), student.selectElectives);
+router.get('/student/remarks',             authorize(S), student.myRemarks);
+router.get('/student/report',              authorize(S), student.myReport);
+router.get('/student/report/annual',       authorize(S), student.myAnnualReport);
 
 // ── Parent ────────────────────────────────────────────────────────────────────
 router.get('/parent/children',                          authorize(P), parent.myChildren);
 router.get('/parent/children/:studentId/performance',   authorize(P), parent.childPerformance);
 router.get('/parent/children/:studentId/fees',          authorize(P), parent.childFeeStatus);
+router.get('/parent/children/:studentId/remarks',       authorize(P), parent.childRemarks);
+router.get('/parent/children/:studentId/report',        authorize(P), parent.childReport);
+router.get('/parent/children/:studentId/report/annual', authorize(P), parent.childAnnualReport);
 router.post('/parent/fees/pay',                         authorize(P), parent.initFeePayment);
 router.get('/parent/fees/verify/:reference',            authorize(P), parent.verifyFeePayment);
 router.post('/webhooks/paystack',                        parent.paystackWebhook);

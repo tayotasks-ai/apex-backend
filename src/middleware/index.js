@@ -20,6 +20,11 @@ const authorize = (...roles) => (req, res, next) => {
   next();
 };
 
+const authorizeRoot = (req, res, next) => {
+  if (req.user?.role !== 'root') return next(new ApiError(403, 'Root access only'));
+  next();
+};
+
 // ── error.js ──────────────────────────────────────────────────────────────────
 const errorHandler = (err, req, res, next) => {
   const status = err.status || err.statusCode || 500;
@@ -45,4 +50,4 @@ const validate = schema => (req, res, next) => {
   next();
 };
 
-module.exports = { authenticate, authorize, errorHandler, validate };
+module.exports = { authenticate, authorize, authorizeRoot, errorHandler, validate };

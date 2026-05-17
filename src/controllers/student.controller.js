@@ -1,7 +1,7 @@
 const {
   Enrollment, Assessment, Result, Quiz, QuizSubmission,
   Assignment, AssignmentSubmission, Note, TimetableEntry,
-  Attendance, AcademicSession, Class,
+  Attendance, AcademicSession, Class, StudentRemark, TermSummary,
 } = require('../models');
 const { catchAsync, ok, created, ApiError, uploadBuffer } = require('../utils/helpers');
 const cloudinary = require('../config/cloudinary');
@@ -166,9 +166,123 @@ const myAttendance = catchAsync(async (req, res) => {
   return ok(res, mine);
 });
 
+// ── Subjects (compulsory + elective selection) ────────────────────────────────
+const mySubjects = catchAsync(async (req, res) => {
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) return ok(res, { compulsory: [], availableElectives: [], selectedElectives: [], maxElectives: 0, hasSelected: false });
+
+  const enrollment = await Enrollment.findOne({ studentId: uId(req), sessionId: session._id });
+  if (!enrollment) return ok(res, { compulsory: [], availableElectives: [], selectedElectives: [], maxElectives: 0, hasSelected: false });
+
+  const cls = await Class.findById(enrollment.classId)
+    .populate('subjects.subjectId', 'name code')
+    .populate('subjects.teacherId', 'name')
+    .lean();
+  if (!cls) return ok(res, { compulsory: [], availableElectives: [], selectedElectives: [], maxElectives: 0, hasSelected: false });
+
+  const selectedIds = new Set((enrollment.electiveSubjectIds || []).map(id => id.toString()));
+  const compulsory = [], availableElectives = [], selectedElectives = [];
+
+  for (const s of cls.subjects) {
+    const entry = {
+      _id: s.subjectId?._id,
+      name: s.subjectId?.name,
+      code: s.subjectId?.code,
+      teacher: s.teacherId?.name || null,
+    };
+    if (s.isCompulsory !== false) {
+      compulsory.push(entry);
+    } else {
+      const isSelected = selectedIds.has(s.subjectId?._id?.toString());
+      availableElectives.push({ ...entry, isSelected });
+      if (isSelected) selectedElectives.push(entry);
+    }
+  }
+
+  return ok(res, {
+    compulsory,
+    availableElectives,
+    selectedElectives,
+    maxElectives: cls.maxElectives || 0,
+    hasSelected: enrollment.electiveSubjectIds?.length > 0,
+  });
+});
+
+const selectElectives = catchAsync(async (req, res) => {
+  const { electiveSubjectIds } = req.body;
+  if (!Array.isArray(electiveSubjectIds)) throw new ApiError(400, 'electiveSubjectIds must be an array');
+
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) throw new ApiError(400, 'No active session');
+
+  const enrollment = await Enrollment.findOne({ studentId: uId(req), sessionId: session._id });
+  if (!enrollment) throw new ApiError(404, 'Not enrolled in any class');
+
+  const cls = await Class.findById(enrollment.classId).lean();
+  if (!cls) throw new ApiError(404, 'Class not found');
+
+  const validElectiveIds = cls.subjects
+    .filter(s => s.isCompulsory === false)
+    .map(s => s.subjectId.toString());
+
+  for (const id of electiveSubjectIds) {
+    if (!validElectiveIds.includes(id.toString())) {
+      throw new ApiError(400, 'One or more selected subjects are not valid electives for your class');
+    }
+  }
+
+  if (cls.maxElectives > 0 && electiveSubjectIds.length > cls.maxElectives) {
+    throw new ApiError(400, `You can only select up to ${cls.maxElectives} elective subject${cls.maxElectives !== 1 ? 's' : ''}`);
+  }
+
+  enrollment.electiveSubjectIds = electiveSubjectIds;
+  await enrollment.save();
+
+  return ok(res, { electiveSubjectIds: enrollment.electiveSubjectIds }, 'Electives saved successfully');
+});
+
+// ── Remarks ───────────────────────────────────────────────────────────────────
+const myRemarks = catchAsync(async (req, res) => {
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) return ok(res, []);
+  const remarks = await StudentRemark.find({ schoolId: sId(req), sessionId: session._id, studentId: uId(req) })
+    .populate('teacherId', 'name')
+    .sort({ createdAt: -1 }).lean();
+  return ok(res, remarks);
+});
+
+// ── Report card ───────────────────────────────────────────────────────────────
+const myReport = catchAsync(async (req, res) => {
+  const { sessionId } = req.query;
+  const filter = { schoolId: sId(req), studentId: uId(req) };
+  if (sessionId) filter.sessionId = sessionId;
+  else {
+    const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+    if (session) filter.sessionId = session._id;
+  }
+  const report = await TermSummary.findOne(filter)
+    .populate('studentId', 'firstName lastName admissionNo gender avatar')
+    .populate('classId', 'name')
+    .populate('sessionId', 'name academicYear termNumber')
+    .lean();
+  if (!report) return ok(res, null, 'Report not yet generated');
+  return ok(res, report);
+});
+
+const myAnnualReport = catchAsync(async (req, res) => {
+  const { academicYear } = req.query;
+  if (!academicYear) throw new ApiError(400, 'academicYear is required');
+  const reports = await TermSummary.find({ schoolId: sId(req), studentId: uId(req), academicYear })
+    .populate('sessionId', 'name termNumber')
+    .sort({ termNumber: 1 }).lean();
+  return ok(res, reports);
+});
+
 module.exports = {
   myEnrollment, myTimetable, myResults,
   myQuizzes, submitQuiz,
   myAssignments, submitAssignment,
   myNotes, myAttendance,
+  mySubjects, selectElectives,
+  myRemarks, myReport, myAnnualReport,
 };

@@ -4,7 +4,7 @@ const { catchAsync, ok, created, ApiError, paginate, meta } = require('../utils/
 const { sendSMS } = require('../utils/sms');
 const { sendEmail } = require('../utils/resend');
 const { uploadBuffer } = require('../config/cloudinary');
-const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment } = require('../models');
+const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment, Branch } = require('../models');
 const { inviteStaff, studentOnboarding, feeReminder } = require('../utils/emailTemplates');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -179,9 +179,17 @@ const updateStudent = catchAsync(async (req, res) => {
 });
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
+const TERM_NAMES = { 1: 'First Term', 2: 'Second Term', 3: 'Third Term' };
+
 const createSession = catchAsync(async (req, res) => {
-  const { name, startDate, endDate } = req.body;
-  const session = await AcademicSession.create({ schoolId: schoolId(req), name, startDate, endDate });
+  const { academicYear, termNumber, startDate, endDate } = req.body;
+  if (!academicYear || !termNumber) throw new ApiError(400, 'academicYear and termNumber are required');
+  if (![1, 2, 3].includes(Number(termNumber))) throw new ApiError(400, 'termNumber must be 1, 2 or 3');
+
+  const name = `${academicYear} ${TERM_NAMES[Number(termNumber)]}`;
+  const session = await AcademicSession.create({
+    schoolId: schoolId(req), name, academicYear, termNumber: Number(termNumber), startDate, endDate,
+  });
   return created(res, session);
 });
 
@@ -459,6 +467,34 @@ const updateSchool = catchAsync(async (req, res) => {
   return ok(res, school);
 });
 
+// ── Branches ──────────────────────────────────────────────────────────────────
+const createBranch = catchAsync(async (req, res) => {
+  const { name, address, phone, principal } = req.body;
+  if (!name) throw new ApiError(400, 'Branch name is required');
+  const branch = await Branch.create({ schoolId: schoolId(req), name, address, phone, principal });
+  return created(res, branch);
+});
+
+const listBranches = catchAsync(async (req, res) => {
+  const branches = await Branch.find({ schoolId: schoolId(req) }).sort({ name: 1 }).lean();
+  return ok(res, branches);
+});
+
+const updateBranch = catchAsync(async (req, res) => {
+  const branch = await Branch.findOneAndUpdate(
+    { _id: req.params.id, schoolId: schoolId(req) },
+    req.body,
+    { new: true }
+  );
+  if (!branch) throw new ApiError(404, 'Branch not found');
+  return ok(res, branch);
+});
+
+const deleteBranch = catchAsync(async (req, res) => {
+  await Branch.findOneAndDelete({ _id: req.params.id, schoolId: schoolId(req) });
+  return ok(res, null, 'Branch deleted');
+});
+
 module.exports = {
   createUser, bulkCreateUsers, listUsers, updateUser,
   createStudent, bulkCreateStudents, listStudents, updateStudent,
@@ -471,4 +507,5 @@ module.exports = {
   createHoliday, listHolidays, deleteHoliday,
   dashboardStats, getSchool, updateSchool,
   sendFeeReminders,
+  createBranch, listBranches, updateBranch, deleteBranch,
 };

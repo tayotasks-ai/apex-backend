@@ -11,6 +11,8 @@ const SchoolSchema = new Schema({
   isActive:  { type: Boolean, default: false },
   plan:      { type: String, enum: ['trial', 'basic', 'pro'], default: 'trial' },
   termiiSenderId: { type: String, default: 'ApexSchool' },
+  caMax:     { type: Number, default: 40 },   // max CA score per subject (default 40/60 split)
+  examMax:   { type: Number, default: 60 },   // max exam score per subject
 }, { timestamps: true });
 
 // ── User  (admin | teacher | parent) ─────────────────────────────────────────
@@ -51,13 +53,16 @@ StudentSchema.index({ email: 1 }, { unique: true, sparse: true });
 
 // ── AcademicSession ───────────────────────────────────────────────────────────
 const SessionSchema = new Schema({
-  schoolId:  { type: Schema.Types.ObjectId, ref: 'School', required: true },
-  name:      { type: String, required: true },   // "2025/2026 First Term"
-  startDate: { type: Date, required: true },
-  endDate:   { type: Date, required: true },
-  isCurrent: { type: Boolean, default: false },
+  schoolId:     { type: Schema.Types.ObjectId, ref: 'School', required: true },
+  name:         { type: String, required: true },   // "2025/2026 First Term" (auto-generated)
+  academicYear: { type: String, required: true },   // "2025/2026"
+  termNumber:   { type: Number, enum: [1, 2, 3], required: true },  // 1=First, 2=Second, 3=Third
+  startDate:    { type: Date, required: true },
+  endDate:      { type: Date, required: true },
+  isCurrent:    { type: Boolean, default: false },
 }, { timestamps: true });
 SessionSchema.index({ schoolId: 1, name: 1 }, { unique: true });
+SessionSchema.index({ schoolId: 1, academicYear: 1, termNumber: 1 }, { unique: true });
 
 // ── Subject ───────────────────────────────────────────────────────────────────
 const SubjectSchema = new Schema({
@@ -72,9 +77,11 @@ const ClassSchema = new Schema({
   schoolId:     { type: Schema.Types.ObjectId, ref: 'School', required: true },
   name:         { type: String, required: true },   // "JSS 1A"
   classTeacher: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  maxElectives: { type: Number, default: 0 },       // max elective subjects a student can pick (0 = no limit)
   subjects: [{
-    subjectId: { type: Schema.Types.ObjectId, ref: 'Subject' },
-    teacherId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    subjectId:    { type: Schema.Types.ObjectId, ref: 'Subject' },
+    teacherId:    { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    isCompulsory: { type: Boolean, default: true },
     _id: false,
   }],
 }, { timestamps: true });
@@ -82,10 +89,11 @@ ClassSchema.index({ schoolId: 1, name: 1 }, { unique: true });
 
 // ── Enrollment (student → class for a session) ────────────────────────────────
 const EnrollmentSchema = new Schema({
-  schoolId:  { type: Schema.Types.ObjectId, ref: 'School', required: true },
-  sessionId: { type: Schema.Types.ObjectId, ref: 'AcademicSession', required: true },
-  classId:   { type: Schema.Types.ObjectId, ref: 'Class', required: true },
-  studentId: { type: Schema.Types.ObjectId, ref: 'Student', required: true },
+  schoolId:          { type: Schema.Types.ObjectId, ref: 'School', required: true },
+  sessionId:         { type: Schema.Types.ObjectId, ref: 'AcademicSession', required: true },
+  classId:           { type: Schema.Types.ObjectId, ref: 'Class', required: true },
+  studentId:         { type: Schema.Types.ObjectId, ref: 'Student', required: true },
+  electiveSubjectIds:[{ type: Schema.Types.ObjectId, ref: 'Subject' }],
 }, { timestamps: true });
 EnrollmentSchema.index({ studentId: 1, sessionId: 1 }, { unique: true });
 
@@ -254,6 +262,64 @@ const HolidaySchema = new Schema({
   color:       { type: String, default: '#6366f1' },
 }, { timestamps: true });
 
+// ── Branch (school can have multiple physical branches) ───────────────────────
+const BranchSchema = new Schema({
+  schoolId:  { type: Schema.Types.ObjectId, ref: 'School', required: true },
+  name:      { type: String, required: true, trim: true },
+  address:   { type: String },
+  phone:     { type: String },
+  principal: { type: String },
+  isActive:  { type: Boolean, default: true },
+}, { timestamps: true });
+BranchSchema.index({ schoolId: 1, name: 1 }, { unique: true });
+
+// ── TermSummary (computed per-student per-session report card data) ────────────
+const TermSummarySchema = new Schema({
+  schoolId:     { type: Schema.Types.ObjectId, ref: 'School', required: true },
+  sessionId:    { type: Schema.Types.ObjectId, ref: 'AcademicSession', required: true },
+  studentId:    { type: Schema.Types.ObjectId, ref: 'Student', required: true },
+  classId:      { type: Schema.Types.ObjectId, ref: 'Class', required: true },
+  academicYear: { type: String, required: true },
+  termNumber:   { type: Number, required: true },
+  subjects: [{
+    subjectId:   { type: Schema.Types.ObjectId, ref: 'Subject' },
+    subjectName: { type: String },
+    caScore:     { type: Number, default: 0 },
+    examScore:   { type: Number, default: 0 },
+    total:       { type: Number, default: 0 },
+    grade:       { type: String },
+    _id: false,
+  }],
+  totalScore:         { type: Number, default: 0 },
+  average:            { type: Number, default: 0 },
+  positionInClass:    { type: Number },
+  classSize:          { type: Number },
+  attendance:         { present: { type: Number, default: 0 }, total: { type: Number, default: 0 } },
+  classTeacherRemark: { type: String, default: '' },
+  principalRemark:    { type: String, default: '' },
+}, { timestamps: true });
+TermSummarySchema.index({ schoolId: 1, sessionId: 1, studentId: 1 }, { unique: true });
+TermSummarySchema.index({ schoolId: 1, studentId: 1, academicYear: 1 });
+
+// ── RootUser (platform super-admin, separate from school users) ───────────────
+const RootUserSchema = new Schema({
+  name:     { type: String, required: true },
+  email:    { type: String, required: true, unique: true, lowercase: true },
+  password: { type: String, required: true, select: false },
+}, { timestamps: true });
+
+// ── Student Remark (teacher behavioural/general remark visible to parent) ─────
+const StudentRemarkSchema = new Schema({
+  schoolId:  { type: Schema.Types.ObjectId, ref: 'School', required: true },
+  sessionId: { type: Schema.Types.ObjectId, ref: 'AcademicSession', required: true },
+  classId:   { type: Schema.Types.ObjectId, ref: 'Class', required: true },
+  studentId: { type: Schema.Types.ObjectId, ref: 'Student', required: true },
+  teacherId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  remark:    { type: String, required: true },
+  category:  { type: String, enum: ['Behaviour', 'Academic', 'Punctuality', 'General'], default: 'General' },
+}, { timestamps: true });
+StudentRemarkSchema.index({ schoolId: 1, sessionId: 1, studentId: 1 });
+
 // ── Notification ──────────────────────────────────────────────────────────────
 const NotificationSchema = new Schema({
   schoolId:    { type: Schema.Types.ObjectId, ref: 'School', required: true },
@@ -274,6 +340,7 @@ module.exports = {
   AcademicSession:      mongoose.model('AcademicSession', SessionSchema),
   Subject:              mongoose.model('Subject', SubjectSchema),
   Class:                mongoose.model('Class', ClassSchema),
+  Branch:               mongoose.model('Branch', BranchSchema),
   Enrollment:           mongoose.model('Enrollment', EnrollmentSchema),
   Attendance:           mongoose.model('Attendance', AttendanceSchema),
   Assessment:           mongoose.model('Assessment', AssessmentSchema),
@@ -288,6 +355,9 @@ module.exports = {
   FeePayment:           mongoose.model('FeePayment', FeePaymentSchema),
   Holiday:              mongoose.model('Holiday', HolidaySchema),
   Notification:         mongoose.model('Notification', NotificationSchema),
+  StudentRemark:        mongoose.model('StudentRemark', StudentRemarkSchema),
+  TermSummary:          mongoose.model('TermSummary', TermSummarySchema),
+  RootUser:             mongoose.model('RootUser', RootUserSchema),
 };
 
 // ── Subscription (SaaS billing — ₦2,000 per student per term) ────────────────

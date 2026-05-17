@@ -1,7 +1,7 @@
 const { v4: uuid } = require('uuid');
 const {
   Student, Enrollment, Result, Assessment, Attendance,
-  AcademicSession, FeeStructure, FeePayment,
+  AcademicSession, FeeStructure, FeePayment, StudentRemark, TermSummary,
 } = require('../models');
 const { catchAsync, ok, created, ApiError, getGrade } = require('../utils/helpers');
 const { initializePayment, verifyPayment } = require('../utils/paystack');
@@ -151,4 +151,54 @@ const paystackWebhook = async (req, res) => {
   }
 };
 
-module.exports = { myChildren, childPerformance, childFeeStatus, initFeePayment, verifyFeePayment, paystackWebhook };
+// ── Child remarks ─────────────────────────────────────────────────────────────
+const childRemarks = catchAsync(async (req, res) => {
+  const { studentId } = req.params;
+  const child = await Student.findOne({ _id: studentId, schoolId: sId(req), parentId: uId(req) });
+  if (!child) throw new ApiError(403, 'Access denied');
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) return ok(res, []);
+  const remarks = await StudentRemark.find({ schoolId: sId(req), sessionId: session._id, studentId })
+    .populate('teacherId', 'name')
+    .sort({ createdAt: -1 }).lean();
+  return ok(res, remarks);
+});
+
+// ── Child report card ─────────────────────────────────────────────────────────
+const childReport = catchAsync(async (req, res) => {
+  const { studentId } = req.params;
+  const child = await Student.findOne({ _id: studentId, schoolId: sId(req), parentId: uId(req) });
+  if (!child) throw new ApiError(403, 'Access denied');
+
+  const { sessionId } = req.query;
+  const filter = { schoolId: sId(req), studentId };
+  if (sessionId) filter.sessionId = sessionId;
+  else {
+    const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+    if (session) filter.sessionId = session._id;
+  }
+
+  const report = await TermSummary.findOne(filter)
+    .populate('studentId', 'firstName lastName admissionNo gender')
+    .populate('classId', 'name')
+    .populate('sessionId', 'name academicYear termNumber')
+    .lean();
+  if (!report) return ok(res, null, 'Report not yet generated');
+  return ok(res, report);
+});
+
+const childAnnualReport = catchAsync(async (req, res) => {
+  const { studentId } = req.params;
+  const child = await Student.findOne({ _id: studentId, schoolId: sId(req), parentId: uId(req) });
+  if (!child) throw new ApiError(403, 'Access denied');
+
+  const { academicYear } = req.query;
+  if (!academicYear) throw new ApiError(400, 'academicYear is required');
+
+  const reports = await TermSummary.find({ schoolId: sId(req), studentId, academicYear })
+    .populate('sessionId', 'name termNumber')
+    .sort({ termNumber: 1 }).lean();
+  return ok(res, reports);
+});
+
+module.exports = { myChildren, childPerformance, childFeeStatus, initFeePayment, verifyFeePayment, paystackWebhook, childRemarks, childReport, childAnnualReport };

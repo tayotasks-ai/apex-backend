@@ -1,7 +1,7 @@
 const {
   Attendance, Assessment, Result, Quiz, Assignment,
   AssignmentSubmission, Note, TimetableEntry,
-  AcademicSession, Class, Enrollment,
+  AcademicSession, Class, Enrollment, StudentRemark, Student,
 } = require('../models');
 const { catchAsync, ok, created, ApiError, getGrade, paginate, meta } = require('../utils/helpers');
 const { sendEmail } = require('../utils/resend');
@@ -367,6 +367,40 @@ const getTimetable = catchAsync(async (req, res) => {
   return ok(res, entries);
 });
 
+// ── Student Remarks ───────────────────────────────────────────────────────────
+const createRemark = catchAsync(async (req, res) => {
+  const { studentId, classId, remark, category } = req.body;
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) throw new ApiError(400, 'No active session');
+  const r = await StudentRemark.create({
+    schoolId: sId(req), sessionId: session._id,
+    classId, studentId, teacherId: uId(req), remark, category: category || 'General',
+  });
+  const populated = await StudentRemark.findById(r._id)
+    .populate('studentId', 'firstName lastName admissionNo')
+    .populate('teacherId', 'name')
+    .lean();
+  return created(res, populated, 'Remark added');
+});
+
+const listRemarks = catchAsync(async (req, res) => {
+  const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  if (!session) return ok(res, []);
+  const filter = { schoolId: sId(req), sessionId: session._id, teacherId: uId(req) };
+  if (req.query.classId)   filter.classId   = req.query.classId;
+  if (req.query.studentId) filter.studentId = req.query.studentId;
+  const remarks = await StudentRemark.find(filter)
+    .populate('studentId', 'firstName lastName admissionNo')
+    .populate('teacherId', 'name')
+    .sort({ createdAt: -1 }).lean();
+  return ok(res, remarks);
+});
+
+const deleteRemark = catchAsync(async (req, res) => {
+  await StudentRemark.findOneAndDelete({ _id: req.params.id, teacherId: uId(req), schoolId: sId(req) });
+  return ok(res, null, 'Remark deleted');
+});
+
 module.exports = {
   myClasses, markAttendance, getAttendance,
   createAssessment, myAssessments, recordResults, releaseAssessment,
@@ -374,4 +408,5 @@ module.exports = {
   createAssignment, myAssignments, deleteAssignment, gradeSubmission, assignmentSubmissions,
   uploadNote, listNotes,
   upsertTimetable, getTimetable,
+  createRemark, listRemarks, deleteRemark,
 };
