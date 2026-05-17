@@ -54,6 +54,8 @@ router.post('/admin/students',            authorize(A), admin.createStudent);
 router.post('/admin/students/bulk',       authorize(A), admin.bulkCreateStudents);
 router.get('/admin/students',             authorize(A), admin.listStudents);
 router.patch('/admin/students/:id',       authorize(A), admin.updateStudent);
+router.get('/admin/students/:id/stats',   authorize(A), admin.getStudentStats);
+router.delete('/admin/students/:id',      authorize(A), admin.deleteStudent);
 
 router.post('/admin/sessions',            authorize(A), admin.createSession);
 router.get('/admin/sessions',             authorize(A), admin.listSessions);
@@ -67,6 +69,7 @@ router.delete('/admin/subjects/:id',      authorize(A), admin.deleteSubject);
 router.post('/admin/classes',             authorize(A), admin.createClass);
 router.get('/admin/classes',              authorize(A), admin.listClasses);
 router.patch('/admin/classes/:id',        authorize(A), admin.updateClass);
+router.get('/admin/classes/:id/stats',    authorize(A), admin.getClassStats);
 
 router.post('/admin/enroll',              authorize(A), admin.enrollStudent);
 router.get('/admin/enrollments',          authorize(T, A), admin.listEnrollments);

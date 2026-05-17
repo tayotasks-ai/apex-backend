@@ -1,10 +1,10 @@
 const bcrypt = require('bcryptjs');
 const genOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-const { catchAsync, ok, created, ApiError, paginate, meta } = require('../utils/helpers');
+const { catchAsync, ok, created, ApiError, paginate, meta, getGrade } = require('../utils/helpers');
 const { sendSMS } = require('../utils/sms');
 const { sendEmail } = require('../utils/resend');
 const { uploadBuffer } = require('../config/cloudinary');
-const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment, Branch } = require('../models');
+const { School, User, Student, AcademicSession, Subject, Class, Enrollment, FeeStructure, Holiday, Notification, FeePayment, Branch, Assessment, Result, Attendance, TermSummary, StudentRemark } = require('../models');
 const { inviteStaff, studentOnboarding, feeReminder } = require('../utils/emailTemplates');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -495,9 +495,184 @@ const deleteBranch = catchAsync(async (req, res) => {
   return ok(res, null, 'Branch deleted');
 });
 
+// ── Admin: Delete student ────────────────────────────────────────────────
+const deleteStudent = catchAsync(async (req, res) => {
+  const s = await Student.findOneAndDelete({ _id: req.params.id, schoolId: schoolId(req) });
+  if (!s) throw new ApiError(404, 'Student not found');
+  return ok(res, null, 'Student deleted');
+});
+
+// ── Admin: Student drill-down stats ──────────────────────────────────────────
+const getStudentStats = catchAsync(async (req, res) => {
+  const sid = schoolId(req);
+  const { id } = req.params;
+
+  const student = await Student.findOne({ _id: id, schoolId: sid }).select('-password').populate('parentId', 'name email phone').lean();
+  if (!student) throw new ApiError(404, 'Student not found');
+
+  const session = await AcademicSession.findOne({ schoolId: sid, isCurrent: true }).lean();
+
+  // Current enrollment
+  const enrollment = session
+    ? await Enrollment.findOne({ schoolId: sid, sessionId: session._id, studentId: id })
+        .populate('classId', 'name classTeacher subjects')
+        .lean()
+    : null;
+
+  // All term summaries (history)
+  const termSummaries = await TermSummary.find({ schoolId: sid, studentId: id })
+    .populate('sessionId', 'name academicYear termNumber')
+    .populate('classId', 'name')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // Current session: assessment results
+  let recentResults = [];
+  if (session) {
+    const classIds = enrollment ? [enrollment.classId?._id] : [];
+    const assessments = classIds.length
+      ? await Assessment.find({ schoolId: sid, sessionId: session._id, classId: { $in: classIds }, isReleased: true })
+          .populate('subjectId', 'name').lean()
+      : [];
+    const aIds = assessments.map(a => a._id);
+    const results = await Result.find({ assessmentId: { $in: aIds }, studentId: id }).lean();
+    const rMap = {};
+    results.forEach(r => { rMap[r.assessmentId.toString()] = r; });
+    recentResults = assessments.map(a => ({
+      title:       a.title,
+      type:        a.type,
+      subject:     a.subjectId?.name,
+      score:       rMap[a._id.toString()]?.score ?? null,
+      maxScore:    a.maxScore,
+      percentage:  rMap[a._id.toString()]?.percentage ?? null,
+      grade:       rMap[a._id.toString()]?.grade ?? null,
+    })).filter(r => r.score !== null);
+  }
+
+  // Attendance summary (current session)
+  let attendance = { present: 0, total: 0, rate: 0 };
+  if (session && enrollment) {
+    const attRecords = await Attendance.find({ schoolId: sid, sessionId: session._id, classId: enrollment.classId?._id }).lean();
+    let present = 0, total = 0;
+    for (const rec of attRecords) {
+      for (const r of rec.records) {
+        if (r.studentId.toString() === id) {
+          total++;
+          if (r.status === 'Present') present++;
+        }
+      }
+    }
+    attendance = { present, total, rate: total > 0 ? Math.round((present / total) * 100) : 0 };
+  }
+
+  // Remarks (current session)
+  const remarks = session
+    ? await StudentRemark.find({ schoolId: sid, sessionId: session._id, studentId: id })
+        .populate('teacherId', 'name')
+        .sort({ createdAt: -1 })
+        .lean()
+    : [];
+
+  return ok(res, {
+    student,
+    currentSession: session?.name || null,
+    enrollment,
+    termSummaries,
+    recentResults,
+    attendance,
+    remarks,
+  });
+});
+
+// ── Admin: Class drill-down stats ─────────────────────────────────────────────
+const getClassStats = catchAsync(async (req, res) => {
+  const sid = schoolId(req);
+  const { id } = req.params;
+
+  const cls = await Class.findOne({ _id: id, schoolId: sid })
+    .populate('classTeacher', 'name email')
+    .populate('subjects.subjectId', 'name')
+    .populate('subjects.teacherId', 'name')
+    .lean();
+  if (!cls) throw new ApiError(404, 'Class not found');
+
+  const session = await AcademicSession.findOne({ schoolId: sid, isCurrent: true }).lean();
+
+  // Students enrolled in this class
+  const enrollments = session
+    ? await Enrollment.find({ schoolId: sid, sessionId: session._id, classId: id })
+        .populate('studentId', 'firstName lastName admissionNo gender avatar parentId')
+        .lean()
+    : [];
+
+  const students = enrollments.map(e => e.studentId).filter(Boolean);
+  const studentIds = students.map(s => s._id);
+
+  // Assessments for this class in current session
+  const assessments = session
+    ? await Assessment.find({ schoolId: sid, sessionId: session._id, classId: id })
+        .populate('subjectId', 'name')
+        .lean()
+    : [];
+
+  // All results
+  const aIds = assessments.map(a => a._id);
+  const allResults = aIds.length ? await Result.find({ assessmentId: { $in: aIds } }).lean() : [];
+
+  // Per-subject average score
+  const subjectStats = {};
+  for (const a of assessments) {
+    const subKey = a.subjectId?._id?.toString();
+    if (!subKey) continue;
+    if (!subjectStats[subKey]) subjectStats[subKey] = { name: a.subjectId.name, scores: [], count: 0 };
+    const subResults = allResults.filter(r => r.assessmentId.toString() === a._id.toString());
+    subResults.forEach(r => { subjectStats[subKey].scores.push(r.score / a.maxScore * 100); subjectStats[subKey].count++; });
+  }
+  const subjectAverages = Object.values(subjectStats).map(s => ({
+    name:    s.name,
+    average: s.scores.length > 0 ? Math.round(s.scores.reduce((a, b) => a + b, 0) / s.scores.length) : 0,
+    count:   s.count,
+  }));
+
+  // Attendance rates
+  let attendanceRate = 0;
+  if (session && studentIds.length) {
+    const attRecords = await Attendance.find({ schoolId: sid, sessionId: session._id, classId: id }).lean();
+    let present = 0, total = 0;
+    for (const rec of attRecords) {
+      for (const r of rec.records) {
+        if (studentIds.map(s => s.toString()).includes(r.studentId.toString())) {
+          total++;
+          if (r.status === 'Present') present++;
+        }
+      }
+    }
+    attendanceRate = total > 0 ? Math.round((present / total) * 100) : 0;
+  }
+
+  // TermSummary leaderboard for this class in current session
+  const leaderboard = session
+    ? await TermSummary.find({ schoolId: sid, sessionId: session._id, classId: id })
+        .populate('studentId', 'firstName lastName admissionNo')
+        .sort({ positionInClass: 1 })
+        .lean()
+    : [];
+
+  return ok(res, {
+    class:         cls,
+    currentSession: session?.name || null,
+    studentCount:  students.length,
+    students,
+    assessmentCount: assessments.length,
+    subjectAverages,
+    attendanceRate,
+    leaderboard,
+  });
+});
+
 module.exports = {
   createUser, bulkCreateUsers, listUsers, updateUser,
-  createStudent, bulkCreateStudents, listStudents, updateStudent,
+  createStudent, bulkCreateStudents, listStudents, updateStudent, deleteStudent,
   createSession, listSessions, setCurrentSession,
   createSubject, bulkCreateSubjects, listSubjects, deleteSubject,
   createClass, listClasses, updateClass,
@@ -508,4 +683,5 @@ module.exports = {
   dashboardStats, getSchool, updateSchool,
   sendFeeReminders,
   createBranch, listBranches, updateBranch, deleteBranch,
+  getStudentStats, getClassStats,
 };
