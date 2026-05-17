@@ -94,6 +94,7 @@ router.get('/admin/reports/session',                     authorize(A), report.ge
 router.get('/admin/reports/student/:studentId',          authorize(A), report.getStudentReport);
 router.get('/admin/reports/student/:studentId/annual',   authorize(A), report.getAnnualReport);
 router.patch('/admin/reports/:id/remarks',               authorize(A), report.updateRemarks);
+router.patch('/admin/sessions/:sessionId/release',       authorize(A), report.releaseResults);
 
 // ── Teacher ───────────────────────────────────────────────────────────────────
 router.get('/teacher/classes',                authorize(T, A), teacher.myClasses);
@@ -139,6 +140,7 @@ router.post('/student/subjects/select',    authorize(S), student.selectElectives
 router.get('/student/remarks',             authorize(S), student.myRemarks);
 router.get('/student/report',              authorize(S), student.myReport);
 router.get('/student/report/annual',       authorize(S), student.myAnnualReport);
+router.get('/student/report/sessions',     authorize(S), student.myReleasedSessions);
 
 // ── Parent ────────────────────────────────────────────────────────────────────
 router.get('/parent/children',                          authorize(P), parent.myChildren);
@@ -147,6 +149,7 @@ router.get('/parent/children/:studentId/fees',          authorize(P), parent.chi
 router.get('/parent/children/:studentId/remarks',       authorize(P), parent.childRemarks);
 router.get('/parent/children/:studentId/report',        authorize(P), parent.childReport);
 router.get('/parent/children/:studentId/report/annual', authorize(P), parent.childAnnualReport);
+router.get('/parent/report/sessions',                   authorize(P), parent.releasedSessions);
 router.post('/parent/fees/pay',                         authorize(P), parent.initFeePayment);
 router.get('/parent/fees/verify/:reference',            authorize(P), parent.verifyFeePayment);
 router.post('/webhooks/paystack',                        parent.paystackWebhook);

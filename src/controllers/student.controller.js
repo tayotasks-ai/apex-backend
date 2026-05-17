@@ -255,11 +255,16 @@ const myRemarks = catchAsync(async (req, res) => {
 const myReport = catchAsync(async (req, res) => {
   const { sessionId } = req.query;
   const filter = { schoolId: sId(req), studentId: uId(req) };
-  if (sessionId) filter.sessionId = sessionId;
-  else {
-    const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  let session;
+  if (sessionId) {
+    session = await AcademicSession.findById(sessionId).lean();
+    filter.sessionId = sessionId;
+  } else {
+    session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true }).lean();
     if (session) filter.sessionId = session._id;
   }
+  if (!session?.resultsReleased) return ok(res, null, 'Results not yet released');
+
   const report = await TermSummary.findOne(filter)
     .populate('studentId', 'firstName lastName admissionNo gender avatar')
     .populate('classId', 'name')
@@ -267,6 +272,12 @@ const myReport = catchAsync(async (req, res) => {
     .lean();
   if (!report) return ok(res, null, 'Report not yet generated');
   return ok(res, report);
+});
+
+const myReleasedSessions = catchAsync(async (req, res) => {
+  const sessions = await AcademicSession.find({ schoolId: sId(req), resultsReleased: true })
+    .sort({ createdAt: -1 }).lean();
+  return ok(res, sessions);
 });
 
 const myAnnualReport = catchAsync(async (req, res) => {
@@ -284,5 +295,5 @@ module.exports = {
   myAssignments, submitAssignment,
   myNotes, myAttendance,
   mySubjects, selectElectives,
-  myRemarks, myReport, myAnnualReport,
+  myRemarks, myReport, myAnnualReport, myReleasedSessions,
 };

@@ -172,11 +172,15 @@ const childReport = catchAsync(async (req, res) => {
 
   const { sessionId } = req.query;
   const filter = { schoolId: sId(req), studentId };
-  if (sessionId) filter.sessionId = sessionId;
-  else {
-    const session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true });
+  let session;
+  if (sessionId) {
+    session = await AcademicSession.findById(sessionId).lean();
+    filter.sessionId = sessionId;
+  } else {
+    session = await AcademicSession.findOne({ schoolId: sId(req), isCurrent: true }).lean();
     if (session) filter.sessionId = session._id;
   }
+  if (!session?.resultsReleased) return ok(res, null, 'Results not yet released');
 
   const report = await TermSummary.findOne(filter)
     .populate('studentId', 'firstName lastName admissionNo gender')
@@ -185,6 +189,12 @@ const childReport = catchAsync(async (req, res) => {
     .lean();
   if (!report) return ok(res, null, 'Report not yet generated');
   return ok(res, report);
+});
+
+const releasedSessions = catchAsync(async (req, res) => {
+  const sessions = await AcademicSession.find({ schoolId: sId(req), resultsReleased: true })
+    .sort({ createdAt: -1 }).lean();
+  return ok(res, sessions);
 });
 
 const childAnnualReport = catchAsync(async (req, res) => {
@@ -201,4 +211,4 @@ const childAnnualReport = catchAsync(async (req, res) => {
   return ok(res, reports);
 });
 
-module.exports = { myChildren, childPerformance, childFeeStatus, initFeePayment, verifyFeePayment, paystackWebhook, childRemarks, childReport, childAnnualReport };
+module.exports = { myChildren, childPerformance, childFeeStatus, initFeePayment, verifyFeePayment, paystackWebhook, childRemarks, childReport, childAnnualReport, releasedSessions };

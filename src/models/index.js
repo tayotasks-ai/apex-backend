@@ -59,7 +59,8 @@ const SessionSchema = new Schema({
   termNumber:   { type: Number, enum: [1, 2, 3], required: true },  // 1=First, 2=Second, 3=Third
   startDate:    { type: Date, required: true },
   endDate:      { type: Date, required: true },
-  isCurrent:    { type: Boolean, default: false },
+  isCurrent:       { type: Boolean, default: false },
+  resultsReleased: { type: Boolean, default: false },
 }, { timestamps: true });
 SessionSchema.index({ schoolId: 1, name: 1 }, { unique: true });
 SessionSchema.index({ schoolId: 1, academicYear: 1, termNumber: 1 }, { unique: true });

@@ -250,4 +250,15 @@ const updateRemarks = catchAsync(async (req, res) => {
   return ok(res, report, 'Remarks updated');
 });
 
-module.exports = { generateReport, getStudentReport, getSessionReports, getAnnualReport, updateRemarks };
+// ── Release results for a session (makes them visible to students & parents) ───
+const releaseResults = catchAsync(async (req, res) => {
+  const session = await AcademicSession.findOneAndUpdate(
+    { _id: req.params.sessionId, schoolId: sId(req) },
+    { resultsReleased: true },
+    { new: true }
+  );
+  if (!session) throw new ApiError(404, 'Session not found');
+  return ok(res, session, 'Results released to students and parents');
+});
+
+module.exports = { generateReport, getStudentReport, getSessionReports, getAnnualReport, updateRemarks, releaseResults };
