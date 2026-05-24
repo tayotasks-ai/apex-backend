@@ -13,6 +13,11 @@ const SchoolSchema = new Schema({
   termiiSenderId: { type: String, default: 'ApexSchool' },
   caMax:     { type: Number, default: 40 },
   examMax:   { type: Number, default: 60 },
+  // Billing configuration – set by root user per negotiation
+  billingRequired:  { type: Boolean, default: false },    // root toggles to enforce subscription billing
+  pricePerStudent:  { type: Number, default: null },       // negotiated ₦ price per student per term (null = not yet set)
+  billingSetBy:     { type: Schema.Types.ObjectId, ref: 'RootUser' },
+  billingSetAt:     { type: Date },
   // Paystack split – set when admin saves bank account
   bankAccount: {
     accountNumber:        { type: String },
@@ -371,19 +376,19 @@ module.exports = {
   RootUser:             mongoose.model('RootUser', RootUserSchema),
 };
 
-// ── Subscription (SaaS billing — ₦2,000 per student per term) ────────────────
+// ── Subscription (SaaS billing — negotiated per-school pricing) ──────────────
 const SubscriptionSchema = new Schema({
   schoolId:        { type: Schema.Types.ObjectId, ref: 'School', required: true, index: true },
   sessionId:       { type: Schema.Types.ObjectId, ref: 'AcademicSession', required: true },
   studentCount:    { type: Number, required: true },
-  pricePerStudent: { type: Number, default: 2000 },
+  pricePerStudent: { type: Number, required: true },       // set from school.pricePerStudent at payment time
   totalAmount:     { type: Number, required: true },
   reference:       { type: String, required: true, unique: true },
   gateway:         { type: String, enum: ['paystack', 'flutterwave'], default: 'paystack' },
   status:          { type: String, enum: ['pending', 'active', 'expired', 'cancelled'], default: 'pending' },
   paidAt:          { type: Date },
   expiresAt:       { type: Date },
-  // SMS quota: ₦2,000 per student / ₦10 per SMS = 200 SMS per student per term
+  // SMS quota: set on activation per school
   smsQuota:        { type: Number, default: 0 },  // set on activation = studentCount * 200
   smsUsed:         { type: Number, default: 0 },  // incremented per broadcast send
   metadata:        { type: Schema.Types.Mixed },

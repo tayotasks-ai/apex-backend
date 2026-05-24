@@ -1,6 +1,6 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const { School, User, Student, AcademicSession, Class, Subscription, Enrollment } = require('./src/models');
+const { School, User, Student, AcademicSession, Class, Subscription, Enrollment, RootUser } = require('./src/models');
 const bcrypt = require('bcryptjs');
 
 async function run() {
@@ -25,11 +25,33 @@ async function run() {
 
     console.log('Found School:', school.name);
 
+    const defaultPassword = await bcrypt.hash('Password123', 10);
+
+    // 0. Seed RootUser
+    let rootEmail = 'root@apexschool.ng';
+    let rootUser = await RootUser.findOne({ email: rootEmail });
+    if (!rootUser) {
+      rootUser = await RootUser.create({
+        name: 'Super Admin',
+        email: rootEmail,
+        password: defaultPassword,
+        role: 'superadmin',
+        isActive: true
+      });
+      console.log(`Created Root User (${rootEmail}) with password: Password123`);
+    } else {
+      rootUser.password = defaultPassword;
+      await rootUser.save();
+      console.log(`Root User already exists, password updated to: Password123`);
+    }
+
     // 1. Subscribe school
     school.plan = 'pro';
     school.isActive = true;
+    school.pricePerStudent = 2000;     // negotiated price for test school
+    school.billingRequired = true;     // enforce billing for test school
     await school.save();
-    console.log('School marked as subscribed (pro, isActive: true).');
+    console.log('School marked as subscribed (pro, isActive: true, pricePerStudent: 2000, billingRequired: true).');
 
     // 2. Ensure an AcademicSession exists
     let session = await AcademicSession.findOne({ schoolId: school._id, isCurrent: true });
@@ -56,8 +78,8 @@ async function run() {
         schoolId: school._id,
         sessionId: session._id,
         studentCount: 10,
-        pricePerStudent: 2000,
-        totalAmount: 20000,
+        pricePerStudent: school.pricePerStudent,
+        totalAmount: 10 * school.pricePerStudent,
         reference: 'TEST_SUB_' + Date.now(),
         gateway: 'paystack',
         status: 'active',
@@ -73,8 +95,6 @@ async function run() {
       await sub.save();
       console.log('Updated existing Subscription to active.');
     }
-
-    const defaultPassword = await bcrypt.hash('Password123', 10);
 
     // 3. Seed Teachers
     console.log('Seeding 10 Teachers...');

@@ -90,7 +90,7 @@ const listSchools = catchAsync(async (req, res) => {
 
   const skip = (Number(page) - 1) * Number(limit);
   const [schools, total] = await Promise.all([
-    School.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+    School.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).select('+billingRequired +pricePerStudent +billingSetAt').lean(),
     School.countDocuments(filter),
   ]);
 
@@ -133,14 +133,74 @@ const getSchool = catchAsync(async (req, res) => {
 
 // ── Update school plan / active status ───────────────────────────────────────
 const updateSchool = catchAsync(async (req, res) => {
-  const { plan, isActive } = req.body;
+  const { plan, isActive, pricePerStudent, billingRequired } = req.body;
   const update = {};
   if (plan !== undefined) update.plan = plan;
   if (isActive !== undefined) update.isActive = isActive;
+  if (pricePerStudent !== undefined) {
+    update.pricePerStudent = pricePerStudent;
+    update.billingSetBy = req.user.id;
+    update.billingSetAt = new Date();
+  }
+  if (billingRequired !== undefined) {
+    // Cannot enable billing without pricing set
+    if (billingRequired === true) {
+      const school = await School.findById(req.params.id).lean();
+      const effectivePrice = pricePerStudent !== undefined ? pricePerStudent : school?.pricePerStudent;
+      if (effectivePrice == null) {
+        throw new ApiError(400, 'Cannot enable billing — pricePerStudent must be set first.');
+      }
+    }
+    update.billingRequired = billingRequired;
+  }
 
   const school = await School.findByIdAndUpdate(req.params.id, update, { new: true });
   if (!school) throw new ApiError(404, 'School not found');
   return ok(res, school, 'School updated');
 });
 
-module.exports = { setup, login, dashboard, listSchools, getSchool, updateSchool };
+// ── Set school pricing (root sets negotiated price per student) ──────────────
+const setSchoolPricing = catchAsync(async (req, res) => {
+  const { pricePerStudent } = req.body;
+  if (pricePerStudent == null || typeof pricePerStudent !== 'number' || pricePerStudent < 0) {
+    throw new ApiError(400, 'pricePerStudent must be a non-negative number');
+  }
+
+  const school = await School.findByIdAndUpdate(
+    req.params.id,
+    {
+      pricePerStudent,
+      billingSetBy: req.user.id,
+      billingSetAt: new Date(),
+    },
+    { new: true }
+  );
+  if (!school) throw new ApiError(404, 'School not found');
+  return ok(res, school, `Pricing set to ₦${pricePerStudent.toLocaleString()} per student`);
+});
+
+// ── Toggle billing requirement for a school ──────────────────────────────────
+const triggerBilling = catchAsync(async (req, res) => {
+  const { billingRequired } = req.body;
+  if (typeof billingRequired !== 'boolean') {
+    throw new ApiError(400, 'billingRequired must be a boolean');
+  }
+
+  const school = await School.findById(req.params.id);
+  if (!school) throw new ApiError(404, 'School not found');
+
+  // Cannot enable billing without pricing configured
+  if (billingRequired && school.pricePerStudent == null) {
+    throw new ApiError(400, 'Cannot enable billing — pricePerStudent must be set first. Set pricing before enabling billing.');
+  }
+
+  school.billingRequired = billingRequired;
+  await school.save();
+
+  return ok(res, school, billingRequired
+    ? `Billing enabled for ${school.name}. School must pay to access guarded features.`
+    : `Billing waived for ${school.name}. School can access all features freely.`
+  );
+});
+
+module.exports = { setup, login, dashboard, listSchools, getSchool, updateSchool, setSchoolPricing, triggerBilling };

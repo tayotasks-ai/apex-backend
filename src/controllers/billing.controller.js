@@ -5,7 +5,6 @@ const { initializePayment: paystackInit, verifyPayment: paystackVerify } = requi
 const { sendEmail } = require('../utils/resend');
 const { subscriptionConfirmed } = require('../utils/emailTemplates');
 
-const PRICE_PER_STUDENT = 2000; // ₦2,000 naira
 const SMS_QUOTA_PER_TERM = 1000; // Flat 1,000 SMS per school per term
 
 // ─── Get current subscription status ─────────────────────────────────────────
@@ -18,18 +17,30 @@ const getSubscriptionStatus = catchAsync(async (req, res) => {
     return ok(res, { status: 'no_session', message: 'No active session set', school });
   }
 
+  // If root hasn't configured pricing yet
+  if (school.pricePerStudent == null) {
+    return ok(res, {
+      status: 'pricing_not_set',
+      message: 'Pricing has not been configured by the platform administrator yet.',
+      school,
+      session: session.name,
+      billingRequired: school.billingRequired,
+    });
+  }
+
   const sub = await Subscription.findOne({ schoolId, sessionId: session._id }).lean();
 
   const studentCount = await Student.countDocuments({ schoolId, isActive: true });
-  const totalDue = studentCount * PRICE_PER_STUDENT;
+  const pricePerStudent = school.pricePerStudent;
+  const totalDue = studentCount * pricePerStudent;
 
   return ok(res, {
     school,
     session: session.name,
     studentCount,
-    pricePerStudent: PRICE_PER_STUDENT,
-    smsPerStudent: SMS_PER_STUDENT,
+    pricePerStudent,
     totalDue,
+    billingRequired: school.billingRequired,
     subscription: sub || null,
     isActive: sub?.status === 'active',
     isPending: sub?.status === 'pending',
@@ -47,6 +58,11 @@ const initSubscription = catchAsync(async (req, res) => {
   const school = await School.findById(schoolId).lean();
   if (!school) throw new ApiError(404, 'School not found');
 
+  // Pricing must be set by root
+  if (school.pricePerStudent == null) {
+    throw new ApiError(400, 'Pricing has not been set by the platform administrator. Please contact support.');
+  }
+
   const session = await AcademicSession.findOne({ schoolId, isCurrent: true });
   if (!session) throw new ApiError(400, `No active session found for this school (ID: ${schoolId}).`);
 
@@ -61,7 +77,8 @@ const initSubscription = catchAsync(async (req, res) => {
     throw new ApiError(400, `You have 0 active students in your database. Enroll students before subscribing.`);
   }
 
-  const totalAmount = studentCount * PRICE_PER_STUDENT;
+  const pricePerStudent = school.pricePerStudent;
+  const totalAmount = studentCount * pricePerStudent;
   const reference = `APEX-SUB-${uuid().replace(/-/g, '').slice(0, 14).toUpperCase()}`;
 
   const admin = await User.findById(req.user.id).lean();
@@ -81,7 +98,7 @@ const initSubscription = catchAsync(async (req, res) => {
         sessionId: session._id.toString(),
         sessionName: session.name,
         studentCount,
-        pricePerStudent: PRICE_PER_STUDENT,
+        pricePerStudent,
       },
       callbackUrl: `${process.env.CLIENT_URL}/admin/billing?ref=${reference}`,
     });
@@ -94,7 +111,7 @@ const initSubscription = catchAsync(async (req, res) => {
   await Subscription.findOneAndUpdate(
     { schoolId, sessionId: session._id },
     {
-      studentCount, pricePerStudent: PRICE_PER_STUDENT, totalAmount,
+      studentCount, pricePerStudent, totalAmount,
       reference, gateway: 'paystack', status: 'pending',
     },
     { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -105,7 +122,7 @@ const initSubscription = catchAsync(async (req, res) => {
     reference,
     studentCount,
     totalAmount,
-    pricePerStudent: PRICE_PER_STUDENT,
+    pricePerStudent,
     session: session.name,
   }, 'Payment initialized');
 });
@@ -195,7 +212,7 @@ const saasOverview = catchAsync(async (req, res) => {
 
   const [schools, subs] = await Promise.all([
     School.find().lean(),
-    Subscription.find({ status: 'active' }).populate('schoolId', 'name email').lean(),
+    Subscription.find({ status: 'active' }).populate('schoolId', 'name email pricePerStudent billingRequired').lean(),
   ]);
 
   const totalRevenue = subs.reduce((s, sub) => s + (sub.totalAmount || 0), 0);
@@ -205,7 +222,6 @@ const saasOverview = catchAsync(async (req, res) => {
     totalSchools: schools.length,
     activeSchools,
     totalRevenue,
-    pricePerStudent: PRICE_PER_STUDENT,
     subscriptions: subs,
     schools,
   });
