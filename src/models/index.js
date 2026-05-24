@@ -42,6 +42,7 @@ const UserSchema = new Schema({
   avatar:   { type: String },
   isActive: { type: Boolean, default: true },
   isVerified: { type: Boolean, default: false },
+  branchId: { type: Schema.Types.ObjectId, ref: 'Branch' },
   verificationToken: { type: String },
 }, { timestamps: true });
 UserSchema.index({ email: 1, schoolId: 1 }, { unique: true });
@@ -61,6 +62,7 @@ const StudentSchema = new Schema({
   parentId:    { type: Schema.Types.ObjectId, ref: 'User', default: null },
   isActive:    { type: Boolean, default: true },
   isVerified:  { type: Boolean, default: false },
+  branchId:    { type: Schema.Types.ObjectId, ref: 'Branch' },
   verificationToken: { type: String },
 }, { timestamps: true });
 StudentSchema.index({ admissionNo: 1, schoolId: 1 }, { unique: true, sparse: true });
@@ -93,6 +95,7 @@ const ClassSchema = new Schema({
   schoolId:     { type: Schema.Types.ObjectId, ref: 'School', required: true },
   name:         { type: String, required: true },   // "JSS 1A"
   classTeacher: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  branchId:     { type: Schema.Types.ObjectId, ref: 'Branch' },
   maxElectives: { type: Number, default: 0 },       // max elective subjects a student can pick (0 = no limit)
   subjects: [{
     subjectId:    { type: Schema.Types.ObjectId, ref: 'Subject' },

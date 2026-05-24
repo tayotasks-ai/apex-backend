@@ -20,10 +20,10 @@ const tmpPw = () => Math.random().toString(36).slice(-8);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 const createUser = catchAsync(async (req, res) => {
-  const { name, email, phone, role } = req.body;
+  const { name, email, phone, role, branchId } = req.body;
   const otp = genOTP();
   const hashed = await hash(tmpPw());
-  const user = await User.create({ schoolId: schoolId(req), name, email: email.toLowerCase(), phone, password: hashed, role, verificationToken: otp, isVerified: false });
+  const user = await User.create({ schoolId: schoolId(req), name, email: email.toLowerCase(), phone, password: hashed, role, branchId: branchId || null, verificationToken: otp, isVerified: false });
 
   const school = await School.findById(schoolId(req));
 
@@ -52,7 +52,7 @@ const bulkCreateUsers = catchAsync(async (req, res) => {
       if (!u.name || !u.email || !u.role) throw new Error('Missing required fields');
       const otp = genOTP();
       const hashed = await hash(tmpPw());
-      const user = await User.create({ schoolId: sid, name: u.name, email: u.email.toLowerCase(), phone: u.phone, password: hashed, role: u.role, verificationToken: otp, isVerified: false });
+      const user = await User.create({ schoolId: sid, name: u.name, email: u.email.toLowerCase(), phone: u.phone, password: hashed, role: u.role, branchId: u.branchId || null, verificationToken: otp, isVerified: false });
 
       await sendEmail({
         to: user.email,
@@ -76,8 +76,9 @@ const bulkCreateUsers = catchAsync(async (req, res) => {
 
 const listUsers = catchAsync(async (req, res) => {
   const { page, limit, skip } = paginate(req.query);
-  const filter = { schoolId: schoolId(req), role: req.query.role };
-  if (!req.query.role) delete filter.role;
+  const filter = { schoolId: schoolId(req) };
+  if (req.query.role) filter.role = req.query.role;
+  if (req.query.branchId) filter.branchId = req.query.branchId;
   const [users, total] = await Promise.all([
     User.find(filter).select('-password').sort({ name: 1 }).skip(skip).limit(limit).populate('subjects', 'name code').lean(),
     User.countDocuments(filter),
@@ -93,12 +94,13 @@ const updateUser = catchAsync(async (req, res) => {
 
 // ── Students ──────────────────────────────────────────────────────────────────
 const createStudent = catchAsync(async (req, res) => {
-  const { firstName, lastName, email, phone, gender, dob, admissionNo, parentId } = req.body;
+  const { firstName, lastName, email, phone, gender, dob, admissionNo, parentId, branchId } = req.body;
   const plain = tmpPw();
   const hashed = await hash(plain);
   const student = await Student.create({
     schoolId: schoolId(req), firstName, lastName,
     email: email?.toLowerCase(), phone, gender, dob, admissionNo, parentId: parentId || null,
+    branchId: branchId || null,
     password: hashed, verificationToken: plain, isVerified: false
   });
   const school = await School.findById(schoolId(req));
@@ -135,6 +137,7 @@ const bulkCreateStudents = catchAsync(async (req, res) => {
       await Student.create({
         schoolId: sid, firstName: s.firstName, lastName: s.lastName,
         email: s.email?.toLowerCase(), phone: s.phone, gender: s.gender, dob: s.dob, admissionNo: s.admissionNo,
+        branchId: s.branchId || null,
         password: hashed, verificationToken: otp, isVerified: false
       });
       const school = await School.findById(sid);
@@ -171,6 +174,7 @@ const listStudents = catchAsync(async (req, res) => {
     const re = new RegExp(req.query.search, 'i');
     filter.$or = [{ firstName: re }, { lastName: re }, { admissionNo: re }, { email: re }];
   }
+  if (req.query.branchId) filter.branchId = req.query.branchId;
   const [students, total] = await Promise.all([
     Student.find(filter).select('-password').sort({ firstName: 1 }).skip(skip).limit(limit).populate('parentId', 'name phone email').lean(),
     Student.countDocuments(filter),
@@ -246,13 +250,15 @@ const deleteSubject = catchAsync(async (req, res) => {
 
 // ── Classes ───────────────────────────────────────────────────────────────────
 const createClass = catchAsync(async (req, res) => {
-  const { name, classTeacher, subjects } = req.body;
-  const cls = await Class.create({ schoolId: schoolId(req), name, classTeacher: classTeacher || null, subjects: subjects || [] });
+  const { name, classTeacher, subjects, branchId } = req.body;
+  const cls = await Class.create({ schoolId: schoolId(req), name, classTeacher: classTeacher || null, branchId: branchId || null, subjects: subjects || [] });
   return created(res, cls);
 });
 
 const listClasses = catchAsync(async (req, res) => {
-  const classes = await Class.find({ schoolId: schoolId(req) })
+  const filter = { schoolId: schoolId(req) };
+  if (req.query.branchId) filter.branchId = req.query.branchId;
+  const classes = await Class.find(filter)
     .populate('classTeacher', 'name email')
     .populate('subjects.subjectId', 'name code')
     .populate('subjects.teacherId', 'name')

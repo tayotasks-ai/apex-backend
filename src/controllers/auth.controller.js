@@ -56,7 +56,7 @@ const login = catchAsync(async (req, res) => {
   if (validUsers.length === 1) {
     const user = validUsers[0];
     const token = signToken({ id: user._id, schoolId: user.schoolId._id, role: user.role });
-    return ok(res, { token, user: { _id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar }, school: user.schoolId });
+    return ok(res, { token, user: { _id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, branchId: user.branchId }, school: user.schoolId });
   }
 
   const options = validUsers.map(u => ({
@@ -82,7 +82,7 @@ const studentLogin = catchAsync(async (req, res) => {
   const token  = signToken({ id: student._id, schoolId: student.schoolId, role: 'student' });
   return ok(res, {
     token,
-    user: { _id: student._id, name: `${student.firstName} ${student.lastName}`, email: student.email, role: 'student', avatar: student.avatar },
+    user: { _id: student._id, name: `${student.firstName} ${student.lastName}`, email: student.email, role: 'student', avatar: student.avatar, branchId: student.branchId },
     school,
   });
 });
@@ -96,7 +96,7 @@ const selectSchool = catchAsync(async (req, res) => {
   if (!valid) throw new ApiError(401, 'Invalid credentials');
 
   const token = signToken({ id: user._id, schoolId: user.schoolId._id, role: user.role });
-  return ok(res, { token, user: { _id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar }, school: user.schoolId });
+  return ok(res, { token, user: { _id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, branchId: user.branchId }, school: user.schoolId });
 });
 
 const verifyEmail = catchAsync(async (req, res) => {
@@ -139,7 +139,8 @@ const verifyEmail = catchAsync(async (req, res) => {
       _id: account._id, 
       name: type === 'student' ? `${account.firstName} ${account.lastName}` : account.name, 
       email: account.email, 
-      role: type === 'student' ? 'student' : account.role 
+      role: type === 'student' ? 'student' : account.role,
+      branchId: account.branchId
     }, 
     school 
   }, 'Verification successful. Your password has been set.');
