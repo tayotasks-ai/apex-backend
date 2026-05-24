@@ -708,6 +708,61 @@ const getClassStats = catchAsync(async (req, res) => {
   });
 });
 
+// ── Banks & Payouts ───────────────────────────────────────────────────────────
+const listBanks = catchAsync(async (req, res) => {
+  const banks = await paystackListBanks();
+  return ok(res, banks);
+});
+
+const resolveAccount = catchAsync(async (req, res) => {
+  const { accountNumber, bankCode } = req.body;
+  if (!accountNumber || !bankCode) throw new ApiError(400, 'accountNumber and bankCode are required');
+  const account = await paystackResolveAccount(accountNumber, bankCode);
+  return ok(res, account);
+});
+
+const setBankAccount = catchAsync(async (req, res) => {
+  const { accountNumber, bankCode, bankName, accountName } = req.body;
+  const sid = schoolId(req);
+  const school = await School.findById(sid);
+
+  if (!accountNumber || !bankCode || !bankName || !accountName) {
+    throw new ApiError(400, 'accountNumber, bankCode, bankName, and accountName are required');
+  }
+
+  let subaccountCode = school.bankAccount?.paystackSubaccountCode;
+  
+  if (subaccountCode) {
+    await updateSubaccount(subaccountCode, {
+      settlement_bank: bankCode,
+      account_number: accountNumber
+    });
+  } else {
+    const subaccount = await createSubaccount({
+      businessName: school.name,
+      settlementBank: bankCode,
+      accountNumber: accountNumber,
+      percentageCharge: 100,
+    });
+    subaccountCode = subaccount.subaccount_code;
+    if (!school.bankAccount) school.bankAccount = {};
+    school.bankAccount.paystackSubaccountId = subaccount.id;
+    school.bankAccount.paystackSubaccountCode = subaccountCode;
+  }
+
+  if (!school.bankAccount) school.bankAccount = {};
+  school.bankAccount.accountNumber = accountNumber;
+  school.bankAccount.bankCode = bankCode;
+  school.bankAccount.bankName = bankName;
+  school.bankAccount.accountName = accountName;
+  school.bankAccount.settlementBank = bankCode;
+
+  school.markModified('bankAccount');
+  await school.save();
+
+  return ok(res, school.bankAccount, 'Bank account configured successfully');
+});
+
 module.exports = {
   createUser, bulkCreateUsers, listUsers, updateUser,
   createStudent, bulkCreateStudents, listStudents, updateStudent, deleteStudent,
