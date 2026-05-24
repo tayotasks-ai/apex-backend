@@ -25,11 +25,13 @@ router.get('/auth/me',             authenticate, auth.me);
 router.post('/root/setup',         root.setup);
 router.post('/root/login',         root.login);
 router.get('/root/dashboard',      authenticate, authorizeRoot, root.dashboard);
+router.post('/root/schools',       authenticate, authorizeRoot, root.createSchool);
 router.get('/root/schools',        authenticate, authorizeRoot, root.listSchools);
 router.get('/root/schools/:id',    authenticate, authorizeRoot, root.getSchool);
 router.patch('/root/schools/:id',          authenticate, authorizeRoot, root.updateSchool);
 router.patch('/root/schools/:id/pricing',  authenticate, authorizeRoot, root.setSchoolPricing);
 router.patch('/root/schools/:id/billing',  authenticate, authorizeRoot, root.triggerBilling);
+router.post('/root/schools/:id/impersonate', authenticate, authorizeRoot, root.impersonateSchoolAdmin);
 
 // ── Billing (admin only — always accessible, subscription gate exempt) ─────────
 const adm = [authenticate, authorize(A)];

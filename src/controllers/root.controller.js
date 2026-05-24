@@ -203,4 +203,75 @@ const triggerBilling = catchAsync(async (req, res) => {
   );
 });
 
-module.exports = { setup, login, dashboard, listSchools, getSchool, updateSchool, setSchoolPricing, triggerBilling };
+// ── Create a completely new school + admin ────────────────────────────────────
+const createSchool = catchAsync(async (req, res) => {
+  const { schoolName, schoolEmail, adminName, adminEmail, adminPhone, password, plan, pricePerStudent, billingRequired } = req.body;
+  if (!schoolName || !schoolEmail || !adminName || !adminEmail || !password) {
+    throw new ApiError(400, 'School name/email and admin name/email/password are required');
+  }
+
+  // Check if school or admin email exists
+  const existingSchool = await School.findOne({ email: schoolEmail.toLowerCase() });
+  if (existingSchool) throw new ApiError(400, 'School email already exists');
+  const existingUser = await User.findOne({ email: adminEmail.toLowerCase() });
+  if (existingUser) throw new ApiError(400, 'Admin email already exists');
+
+  // Create school
+  const school = await School.create({
+    name: schoolName,
+    email: schoolEmail.toLowerCase(),
+    plan: plan || 'free',
+    isActive: true,
+    pricePerStudent: pricePerStudent != null ? pricePerStudent : null,
+    billingRequired: billingRequired === true,
+    billingSetBy: pricePerStudent != null ? req.user.id : null,
+    billingSetAt: pricePerStudent != null ? new Date() : null
+  });
+
+  // Create admin user
+  const hashed = await bcrypt.hash(password, 12);
+  const admin = await User.create({
+    schoolId: school._id,
+    name: adminName,
+    email: adminEmail.toLowerCase(),
+    phone: adminPhone || '',
+    password: hashed,
+    role: 'admin',
+    isActive: true,
+    isVerified: true
+  });
+
+  return created(res, { school, admin }, 'School completely set up');
+});
+
+// ── Impersonate Admin ─────────────────────────────────────────────────────────
+const impersonateSchoolAdmin = catchAsync(async (req, res) => {
+  const school = await School.findById(req.params.id);
+  if (!school) throw new ApiError(404, 'School not found');
+
+  // Find the first admin of the school to impersonate
+  const adminUser = await User.findOne({ schoolId: school._id, role: 'admin' });
+  if (!adminUser) throw new ApiError(404, 'No admin user found for this school');
+
+  // Generate an auth token for this admin
+  const token = signToken({ id: adminUser._id, role: 'admin', schoolId: school._id });
+
+  return ok(res, {
+    token,
+    user: {
+      _id: adminUser._id,
+      name: adminUser.name,
+      email: adminUser.email,
+      role: 'admin',
+      schoolId: school._id,
+      branchId: adminUser.branchId || null
+    },
+    school: {
+      _id: school._id,
+      name: school.name,
+      email: school.email
+    }
+  }, `Impersonating Admin: ${adminUser.name}`);
+});
+
+module.exports = { setup, login, dashboard, createSchool, listSchools, getSchool, updateSchool, setSchoolPricing, triggerBilling, impersonateSchoolAdmin };
